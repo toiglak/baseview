@@ -1,10 +1,10 @@
 use windows_core::{ComObject, Result, HSTRING};
 use windows_sys::Win32::{
-    Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM},
+    Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
     UI::{
         Controls::WM_MOUSELEAVE,
         WindowsAndMessaging::{
-            PostMessageW, HTCLIENT, WHEEL_DELTA, WM_CHAR, WM_CLOSE, WM_DPICHANGED,
+            GetCursorPos, PostMessageW, HTCLIENT, WHEEL_DELTA, WM_CHAR, WM_CLOSE, WM_DPICHANGED,
             WM_INPUTLANGCHANGE, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDOWN, WM_LBUTTONUP,
             WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEHWHEEL, WM_MOUSEMOVE, WM_MOUSEWHEEL,
             WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETCURSOR, WM_SETFOCUS, WM_SIZE, WM_SYSCHAR,
@@ -235,8 +235,17 @@ unsafe fn wnd_proc_inner(
 
             let physical_pos = PhyPoint { x, y };
             let logical_pos = physical_pos.to_logical(&window_state.window_info());
+
+            let mut screen_physical_pos = POINT { x: 0, y: 0 };
+            unsafe {
+                GetCursorPos(&mut screen_physical_pos);
+            }
+            let screen_physical = PhyPoint { x: screen_physical_pos.x, y: screen_physical_pos.y };
+            let screen_logical_pos = screen_physical.to_logical(&window_state.window_info());
+
             let move_event = Event::Mouse(MouseEvent::CursorMoved {
                 position: logical_pos,
+                screen_position: screen_logical_pos,
                 modifiers: window_state
                     .keyboard_state
                     .borrow()

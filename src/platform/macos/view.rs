@@ -11,10 +11,10 @@ use crate::{
 use objc2::__framework_prelude::Retained;
 use objc2::rc::Weak;
 use objc2::runtime::{NSObjectProtocol, ProtocolObject};
-use objc2::{msg_send, AllocAnyThread};
+use objc2::{msg_send, AllocAnyThread, MainThreadMarker};
 use objc2_app_kit::{
-    NSApplication, NSDragOperation, NSDraggingInfo, NSEvent, NSFilenamesPboardType, NSTrackingArea,
-    NSTrackingAreaOptions, NSView, NSWindow,
+    NSApplication, NSDragOperation, NSDraggingInfo, NSEvent, NSFilenamesPboardType, NSScreen,
+    NSTrackingArea, NSTrackingAreaOptions, NSView, NSWindow,
 };
 use objc2_foundation::{NSArray, NSNotification, NSPoint, NSRect, NSSize, NSString};
 use std::cell::{Cell, RefCell};
@@ -358,13 +358,16 @@ impl ViewImpl for BaseviewView {
 
     fn mouse_moved(this: ViewRef<Self>, event: &NSEvent) {
         let point = this.view.convertPoint_fromView(event.locationInWindow(), None);
+        let screen_point = NSEvent::mouseLocation();
 
         let position = Point { x: point.x, y: point.y };
+        let screen_position = screen_position_from_bottom_origin(screen_point);
 
         Self::trigger_event(
             this,
             Event::Mouse(MouseEvent::CursorMoved {
                 position,
+                screen_position,
                 modifiers: make_modifiers(event.modifierFlags()),
             }),
         );
@@ -394,9 +397,11 @@ impl ViewImpl for BaseviewView {
     ) -> NSDragOperation {
         let modifiers = this.keyboard_state.last_mods();
         let drop_data = get_drop_data(sender);
+        let (position, screen_position) = get_drag_position(sender);
 
         let event = MouseEvent::DragEntered {
-            position: get_drag_position(sender),
+            position,
+            screen_position,
             modifiers: make_modifiers(modifiers),
             data: drop_data,
         };
@@ -409,9 +414,11 @@ impl ViewImpl for BaseviewView {
     ) -> NSDragOperation {
         let modifiers = this.keyboard_state.last_mods();
         let drop_data = get_drop_data(sender);
+        let (position, screen_position) = get_drag_position(sender);
 
         let event = MouseEvent::DragMoved {
-            position: get_drag_position(sender),
+            position,
+            screen_position,
             modifiers: make_modifiers(modifiers),
             data: drop_data,
         };
@@ -433,9 +440,11 @@ impl ViewImpl for BaseviewView {
     ) -> bool {
         let modifiers = this.keyboard_state.last_mods();
         let drop_data = get_drop_data(sender);
+        let (position, screen_position) = get_drag_position(sender);
 
         let event = MouseEvent::DragDropped {
-            position: get_drag_position(sender),
+            position,
+            screen_position,
             modifiers: make_modifiers(modifiers),
             data: drop_data,
         };
@@ -616,13 +625,24 @@ fn new_tracking_area(this: &NSView) -> Retained<NSTrackingArea> {
     }
 }
 
-fn get_drag_position(sender: Option<&ProtocolObject<dyn NSDraggingInfo>>) -> Point {
+fn get_drag_position(sender: Option<&ProtocolObject<dyn NSDraggingInfo>>) -> (Point, Point) {
     let point = match sender {
         Some(sender) => sender.draggingLocation(),
         None => NSPoint::ZERO,
     };
 
-    Point::new(point.x, point.y)
+    (Point::new(point.x, point.y), screen_position_from_bottom_origin(NSEvent::mouseLocation()))
+}
+
+fn screen_position_from_bottom_origin(point: NSPoint) -> Point {
+    let mtm =
+        MainThreadMarker::new().unwrap_or_else(|| unsafe { MainThreadMarker::new_unchecked() });
+
+    let Some(screen) = NSScreen::mainScreen(mtm) else {
+        return Point::new(point.x, point.y);
+    };
+
+    Point::new(point.x, screen.frame().size.height - point.y)
 }
 
 fn get_drop_data(sender: Option<&ProtocolObject<dyn NSDraggingInfo>>) -> DropData {

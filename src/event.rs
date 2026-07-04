@@ -38,8 +38,10 @@ pub enum ScrollDelta {
 pub enum MouseEvent {
     /// The mouse cursor was moved
     CursorMoved {
-        /// The logical coordinates of the mouse position
+        /// The logical coordinates of the mouse position, relative to the window.
         position: Point,
+        /// The logical coordinates of the mouse position in screen space.
+        screen_position: Point,
         /// The modifiers that were held down just before the event.
         modifiers: Modifiers,
     },
@@ -79,8 +81,10 @@ pub enum MouseEvent {
     CursorLeft,
 
     DragEntered {
-        /// The logical coordinates of the mouse position
+        /// The logical coordinates of the mouse position, relative to the window.
         position: Point,
+        /// The logical coordinates of the mouse position in screen space.
+        screen_position: Point,
         /// The modifiers that were held down just before the event.
         modifiers: Modifiers,
         /// Data being dragged
@@ -88,8 +92,10 @@ pub enum MouseEvent {
     },
 
     DragMoved {
-        /// The logical coordinates of the mouse position
+        /// The logical coordinates of the mouse position, relative to the window.
         position: Point,
+        /// The logical coordinates of the mouse position in screen space.
+        screen_position: Point,
         /// The modifiers that were held down just before the event.
         modifiers: Modifiers,
         /// Data being dragged
@@ -99,8 +105,10 @@ pub enum MouseEvent {
     DragLeft,
 
     DragDropped {
-        /// The logical coordinates of the mouse position
+        /// The logical coordinates of the mouse position, relative to the window.
         position: Point,
+        /// The logical coordinates of the mouse position in screen space.
+        screen_position: Point,
         /// The modifiers that were held down just before the event.
         modifiers: Modifiers,
         /// Data being dragged

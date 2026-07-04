@@ -55,6 +55,8 @@ pub(crate) enum DragNDropState {
         source_window: xproto::Window,
         /// The current position of the pointer, from the last received position event.
         position: PhyPoint,
+        /// The current screen position of the pointer, from the last received position event.
+        screen_position: PhyPoint,
         /// The timestamp of the event we made the selection request from.
         ///
         /// This is either from the first position event, or from the drop event if it arrived first.
@@ -82,6 +84,7 @@ pub(crate) enum DragNDropState {
         /// The source window the current drag session originates from.
         source_window: xproto::Window,
         position: PhyPoint,
+        screen_position: PhyPoint,
         data: DropData,
         requested_action: Option<DndAction>,
     },
@@ -192,6 +195,7 @@ impl DragNDropState {
                     requested_at: timestamp,
                     source_window: event_source_window,
                     position: PhyPoint::new(0, 0),
+                    screen_position: PhyPoint::new(event_x, event_y),
                     requested_action,
                     dropped: false,
                 };
@@ -203,14 +207,17 @@ impl DragNDropState {
             }
 
             // We are still waiting for the data. So we'll just update the position in the meantime.
-            WaitingForData { position, .. } => {
+            WaitingForData { position, screen_position, .. } => {
                 *position = translate_root_coordinates(window, event_x, event_y)?;
+                *screen_position = PhyPoint::new(event_x, event_y);
 
                 Ok(())
             }
 
             // We have already received the data. We can update the position and notify the handler
-            Ready { protocol_version, position, data, requested_action, .. } => {
+            Ready {
+                protocol_version, position, screen_position, data, requested_action, ..
+            } => {
                 // Inform the source that we are still accepting the drop.
                 // Do this first, in case translate_root_coordinates fails, or the handler panics.
                 // Do not return right away on failure though, we can still inform the handler about
@@ -219,6 +226,7 @@ impl DragNDropState {
                     send_status_event(event_source_window, window, *requested_action);
 
                 *position = translate_root_coordinates(window, event_x, event_y)?;
+                *screen_position = PhyPoint::new(event_x, event_y);
 
                 // In version <2, action isn't specified
                 *requested_action = if *protocol_version < 2 {
@@ -231,6 +239,7 @@ impl DragNDropState {
                     &mut crate::Window::new(Window { inner: window }),
                     Event::Mouse(MouseEvent::DragMoved {
                         position: position.to_logical(&window.window_info),
+                        screen_position: screen_position.to_logical(&window.window_info),
                         data: data.clone(),
                         // We don't get modifiers for drag n drop events.
                         modifiers: Modifiers::empty(),
@@ -342,6 +351,7 @@ impl DragNDropState {
                     // We don't have usable position data. Maybe we'll receive a position later,
                     // but otherwise this will have to do.
                     position: PhyPoint::new(0, 0),
+                    screen_position: PhyPoint::new(0, 0),
                     requested_action: Some(DndAction::Private),
                     dropped: true,
                 };
@@ -371,7 +381,7 @@ impl DragNDropState {
 
             // The normal case.
             Ready { .. } => {
-                let Ready { data, position, requested_action, .. } =
+                let Ready { data, position, screen_position, requested_action, .. } =
                     mem::replace(self, NoCurrentSession)
                 else {
                     unreachable!()
@@ -386,6 +396,7 @@ impl DragNDropState {
                     &mut crate::Window::new(Window { inner: window }),
                     Event::Mouse(MouseEvent::DragDropped {
                         position: position.to_logical(&window.window_info),
+                        screen_position: screen_position.to_logical(&window.window_info),
                         data,
                         // We don't get modifiers for drag n drop events.
                         modifiers: Modifiers::empty(),
@@ -406,6 +417,7 @@ impl DragNDropState {
             source_window,
             requested_at,
             position,
+            screen_position,
             dropped,
             protocol_version,
             requested_action,
@@ -441,6 +453,7 @@ impl DragNDropState {
             }
             Ok(data) => {
                 let logical_position = position.to_logical(&window.window_info);
+                let logical_screen_position = screen_position.to_logical(&window.window_info);
 
                 // Inform the source that we are (still) accepting the drop.
 
@@ -455,6 +468,7 @@ impl DragNDropState {
                         &mut crate::Window::new(Window { inner: window }),
                         Event::Mouse(MouseEvent::DragEntered {
                             position: logical_position,
+                            screen_position: logical_screen_position,
                             data: data.clone(),
                             // We don't get modifiers for drag n drop events.
                             modifiers: Modifiers::empty(),
@@ -465,6 +479,7 @@ impl DragNDropState {
                         &mut crate::Window::new(Window { inner: window }),
                         Event::Mouse(MouseEvent::DragDropped {
                             position: logical_position,
+                            screen_position: logical_screen_position,
                             data: data.clone(),
                             // We don't get modifiers for drag n drop events.
                             modifiers: Modifiers::empty(),
@@ -478,6 +493,7 @@ impl DragNDropState {
                         data: data.clone(),
                         source_window,
                         position,
+                        screen_position,
                         requested_action,
                         protocol_version,
                     };
@@ -489,6 +505,7 @@ impl DragNDropState {
                         &mut crate::Window::new(Window { inner: window }),
                         Event::Mouse(MouseEvent::DragEntered {
                             position: logical_position,
+                            screen_position: logical_screen_position,
                             data,
                             // We don't get modifiers for drag n drop events.
                             modifiers: Modifiers::empty(),

@@ -3,8 +3,12 @@ use crate::wrappers::appkit::new_class_name;
 use objc2::__framework_prelude::{AnyClass, AnyObject, Bool, Sel};
 use objc2::ffi::objc_disposeClassPair;
 use objc2::runtime::ClassBuilder;
-use objc2::{msg_send, sel, ClassType};
-use objc2_app_kit::{NSEvent, NSView};
+use objc2::{msg_send, sel, ClassType, ProtocolType};
+use objc2_app_kit::{NSEvent, NSTextInputClient, NSView};
+use objc2_foundation::{
+    NSArray, NSAttributedString, NSAttributedStringKey, NSNotFound, NSPoint, NSRange,
+    NSRangePointer, NSRect, NSUInteger,
+};
 use std::ffi::c_void;
 
 /// # Safety
@@ -21,6 +25,14 @@ pub unsafe fn create_view_class<V: ViewImpl>() -> &'static AnyClass {
     let class_name = new_class_name("BaseviewNSView_");
 
     let mut class = ClassBuilder::new(&class_name, NSView::class()).unwrap();
+
+    // Some DAW hosts keep global computer-keyboard shortcuts active unless the embedded first
+    // responder advertises itself as a native macOS text-input client. egui-baseview still handles
+    // the actual text editing through key events; this conformance makes AppKit and the host treat
+    // the focused plugin view as a text-entry target instead of a generic NSView.
+    if let Some(protocol) = <dyn NSTextInputClient>::protocol() {
+        class.add_protocol(protocol);
+    }
 
     // SAFETY: All of these function signatures are correct
     unsafe {
@@ -129,11 +141,106 @@ pub unsafe fn create_view_class<V: ViewImpl>() -> &'static AnyClass {
         class.add_method(sel!(keyDown:), key_down::<V> as extern "C-unwind" fn(_, _, _));
         class.add_method(sel!(keyUp:), key_up::<V> as extern "C-unwind" fn(_, _, _));
         class.add_method(sel!(flagsChanged:), flags_changed::<V> as extern "C-unwind" fn(_, _, _));
+
+        class.add_method(
+            sel!(insertText:replacementRange:),
+            insert_text as extern "C-unwind" fn(_, _, _, _),
+        );
+        class.add_method(
+            sel!(doCommandBySelector:),
+            do_command_by_selector as extern "C-unwind" fn(_, _, _),
+        );
+        class.add_method(
+            sel!(setMarkedText:selectedRange:replacementRange:),
+            set_marked_text as extern "C-unwind" fn(_, _, _, _, _),
+        );
+        class.add_method(sel!(unmarkText), unmark_text as extern "C-unwind" fn(_, _));
+        class.add_method(sel!(selectedRange), selected_range as extern "C-unwind" fn(_, _) -> _);
+        class.add_method(sel!(markedRange), marked_range as extern "C-unwind" fn(_, _) -> _);
+        class.add_method(sel!(hasMarkedText), has_marked_text as extern "C-unwind" fn(_, _) -> _);
+        class.add_method(
+            sel!(attributedSubstringForProposedRange:actualRange:),
+            attributed_substring_for_proposed_range as extern "C-unwind" fn(_, _, _, _) -> _,
+        );
+        class.add_method(
+            sel!(validAttributesForMarkedText),
+            valid_attributes_for_marked_text as extern "C-unwind" fn(_, _) -> _,
+        );
+        class.add_method(
+            sel!(firstRectForCharacterRange:actualRange:),
+            first_rect_for_character_range as extern "C-unwind" fn(_, _, _, _) -> _,
+        );
+        class.add_method(
+            sel!(characterIndexForPoint:),
+            character_index_for_point as extern "C-unwind" fn(_, _, _) -> _,
+        );
     }
 
     class.add_ivar::<*mut c_void>(BASEVIEW_STATE_IVAR);
 
     class.register()
+}
+
+// These NSTextInputClient methods intentionally expose conservative empty state. egui-baseview
+// owns the editable text model and receives translated key events through Baseview's normal event
+// path, so maintaining a second AppKit-side selection/composition model here would desynchronize
+// the two. This is sufficient for native text-input recognition; full IME composition can be wired
+// through these methods separately if Baseview gains an IME event model.
+extern "C-unwind" fn insert_text(
+    _this: &NSView, _sel: Sel, _string: &AnyObject, _replacement_range: NSRange,
+) {
+}
+
+extern "C-unwind" fn do_command_by_selector(_this: &NSView, _sel: Sel, _selector: Sel) {}
+
+extern "C-unwind" fn set_marked_text(
+    _this: &NSView, _sel: Sel, _string: &AnyObject, _selected_range: NSRange,
+    _replacement_range: NSRange,
+) {
+}
+
+extern "C-unwind" fn unmark_text(_this: &NSView, _sel: Sel) {}
+
+extern "C-unwind" fn selected_range(_this: &NSView, _sel: Sel) -> NSRange {
+    NSRange::new(0, 0)
+}
+
+extern "C-unwind" fn marked_range(_this: &NSView, _sel: Sel) -> NSRange {
+    NSRange::new(NSNotFound as usize, 0)
+}
+
+extern "C-unwind" fn has_marked_text(_this: &NSView, _sel: Sel) -> Bool {
+    Bool::NO
+}
+
+extern "C-unwind" fn attributed_substring_for_proposed_range(
+    _this: &NSView, _sel: Sel, _range: NSRange, actual_range: NSRangePointer,
+) -> *mut NSAttributedString {
+    if !actual_range.is_null() {
+        unsafe { actual_range.write(NSRange::new(NSNotFound as usize, 0)) };
+    }
+    core::ptr::null_mut()
+}
+
+extern "C-unwind" fn valid_attributes_for_marked_text(
+    _this: &NSView, _sel: Sel,
+) -> *mut NSArray<NSAttributedStringKey> {
+    Retained::autorelease_return(NSArray::from_slice(&[]))
+}
+
+extern "C-unwind" fn first_rect_for_character_range(
+    _this: &NSView, _sel: Sel, _range: NSRange, actual_range: NSRangePointer,
+) -> NSRect {
+    if !actual_range.is_null() {
+        unsafe { actual_range.write(NSRange::new(NSNotFound as usize, 0)) };
+    }
+    NSRect::ZERO
+}
+
+extern "C-unwind" fn character_index_for_point(
+    _this: &NSView, _sel: Sel, _point: NSPoint,
+) -> NSUInteger {
+    NSNotFound as usize
 }
 
 pub extern "C-unwind" fn dealloc<V: ViewImpl>(this: &mut AnyObject, _sel: Sel) {

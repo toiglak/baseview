@@ -491,6 +491,12 @@ impl ViewImpl for BaseviewView {
     }
 
     fn mouse_down(this: ViewRef<Self>, event: &NSEvent) {
+        if let Some(window) = this.view.window() {
+            // Embedded plugin views can lose first-responder status back to the host. Reacquire
+            // it on click so subsequent keyboard input is routed through this NSView.
+            window.makeFirstResponder(Some(this.view));
+        }
+
         Self::trigger_event(
             this,
             Event::Mouse(ButtonPressed {
